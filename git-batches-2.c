@@ -706,12 +706,14 @@ void process_git_groups(GroupResult *result, const char *commit_info_file) {
       execute_git_command(commit_command);
     }
 
+    execute_git_command("git push");
+
     printf("分组 %d 处理完成\n\n", i + 1);
   }
 
   // 最后执行 git push
-  printf("执行最终的 git push...\n");
-  execute_git_command("git push");
+  // printf("执行最终的 git push...\n");
+  // execute_git_command("git push");
   printf("所有分组处理完成！\n");
 }
 
