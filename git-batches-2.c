@@ -337,25 +337,38 @@ int move_to_backup(const char *filepath) {
     }
   }
 
-  // 获取文件的相对路径（相对于当前目录）
+  // 处理文件路径 - 如果是相对路径，转换为相对于当前目录的完整路径
+  char full_filepath[MAX_PATH_LENGTH];
+  if (filepath[0] == '/' || filepath[0] == '\\' ||
+      (strlen(filepath) > 1 && filepath[1] == ':')) {
+    // 已经是绝对路径
+    strcpy_s(full_filepath, sizeof(full_filepath), filepath);
+  } else {
+    // 相对路径，转换为绝对路径
+    _snprintf_s(full_filepath, sizeof(full_filepath), _TRUNCATE, "%s\\%s",
+                current_dir, filepath);
+  }
+
+  printf("处理文件: %s\n", full_filepath);
+  printf("当前目录: %s\n", current_dir);
+  printf("备份目录: %s\n", backup_dir);
+
+  // 计算相对于当前目录的路径
   char relative_path[MAX_PATH_LENGTH];
-  printf("filepath: %s, ", filepath);
-  printf("current_dir: %s\n", current_dir);
-  printf("strstr(filepath, current_dir): %s\n", strstr(filepath, current_dir));
-  if (strstr(filepath, current_dir) == filepath) {
+  if (_strnicmp(full_filepath, current_dir, strlen(current_dir)) == 0) {
     // 文件在当前目录或其子目录中
     strcpy_s(relative_path, sizeof(relative_path),
-             filepath + strlen(current_dir));
+             full_filepath + strlen(current_dir));
     // 去除开头的反斜杠
     if (relative_path[0] == '\\' || relative_path[0] == '/') {
       memmove(relative_path, relative_path + 1, strlen(relative_path));
     }
-    printf("uuuuuuuuuuuuuuuuuuuuuuuuu\n");
+    printf("文件在当前目录下，相对路径: %s\n", relative_path);
   } else {
     // 文件不在当前目录下，只使用文件名
-    const char *filename = get_file_name(filepath);
+    const char *filename = get_file_name(full_filepath);
     strcpy_s(relative_path, sizeof(relative_path), filename);
-    printf("xxxxxxxxxxxxxxxxxxxxxxxxx\n");
+    printf("文件不在当前目录下，只使用文件名: %s\n", relative_path);
   }
 
   // 构建完整的备份文件路径
@@ -363,33 +376,50 @@ int move_to_backup(const char *filepath) {
   _snprintf_s(backup_path, sizeof(backup_path), _TRUNCATE, "%s\\%s", backup_dir,
               relative_path);
 
+  printf("备份路径: %s\n", backup_path);
+
   // 创建备份文件所需的目录结构
   char backup_dir_path[MAX_PATH_LENGTH];
   get_directory_path(backup_path, backup_dir_path, sizeof(backup_dir_path));
 
-  if (strlen(backup_dir_path) > 0 && backup_dir_path[0] != '\0') {
-    // 递归创建目录
-    char *path_ptr = backup_dir_path;
-    if (strstr(path_ptr, backup_dir) == path_ptr) {
-      path_ptr += strlen(backup_dir);
-      if (path_ptr[0] == '\\' || path_ptr[0] == '/') {
-        path_ptr++;
+  printf("需要创建的备份目录: %s\n", backup_dir_path);
+
+  // 递归创建目录
+  if (strlen(backup_dir_path) > 0) {
+    char temp_path[MAX_PATH_LENGTH];
+    strcpy_s(temp_path, sizeof(temp_path), backup_dir_path);
+
+    // 如果路径以备份目录开头，跳过备份目录部分
+    char *path_to_create = temp_path;
+    if (_strnicmp(temp_path, backup_dir, strlen(backup_dir)) == 0) {
+      path_to_create = temp_path + strlen(backup_dir);
+      if (path_to_create[0] == '\\' || path_to_create[0] == '/') {
+        path_to_create++;
       }
     }
 
-    char current_path[MAX_PATH_LENGTH];
-    strcpy_s(current_path, sizeof(current_path), backup_dir);
+    printf("需要创建的相对目录: %s\n", path_to_create);
 
-    char *token = strtok(path_ptr, "\\/");
+    // 逐个创建目录
+    char current_create_path[MAX_PATH_LENGTH];
+    strcpy_s(current_create_path, sizeof(current_create_path), backup_dir);
+
+    char *token = strtok(path_to_create, "\\/");
     while (token != NULL) {
-      strcat_s(current_path, sizeof(current_path), "\\");
-      strcat_s(current_path, sizeof(current_path), token);
+      strcat_s(current_create_path, sizeof(current_create_path), "\\");
+      strcat_s(current_create_path, sizeof(current_create_path), token);
 
-      if (!CreateDirectoryA(current_path, NULL)) {
+      printf("创建目录: %s\n", current_create_path);
+
+      if (!CreateDirectoryA(current_create_path, NULL)) {
         if (GetLastError() != ERROR_ALREADY_EXISTS) {
-          printf("警告: 无法创建备份子目录 %s，错误代码: %lu\n", current_path,
-                 GetLastError());
+          printf("警告: 无法创建备份子目录 %s，错误代码: %lu\n",
+                 current_create_path, GetLastError());
+        } else {
+          printf("目录已存在: %s\n", current_create_path);
         }
+      } else {
+        printf("成功创建目录: %s\n", current_create_path);
       }
 
       token = strtok(NULL, "\\/");
@@ -397,8 +427,9 @@ int move_to_backup(const char *filepath) {
   }
 
   // 移动文件
-  if (MoveFileA(filepath, backup_path)) {
-    printf("已移动原文件到备份: %s -> %s\n", filepath, backup_path);
+  printf("移动文件: %s -> %s\n", full_filepath, backup_path);
+  if (MoveFileA(full_filepath, backup_path)) {
+    printf("已移动原文件到备份: %s -> %s\n", full_filepath, backup_path);
     return 1;
   } else {
     DWORD error = GetLastError();
@@ -410,9 +441,10 @@ int move_to_backup(const char *filepath) {
       char parent_dir[MAX_PATH_LENGTH];
       get_directory_path(backup_path, parent_dir, sizeof(parent_dir));
 
+      printf("创建父目录: %s\n", parent_dir);
       if (CreateDirectoryA(parent_dir, NULL) ||
           GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (MoveFileA(filepath, backup_path)) {
+        if (MoveFileA(full_filepath, backup_path)) {
           printf("重试成功: 已移动原文件到备份\n");
           return 1;
         } else {

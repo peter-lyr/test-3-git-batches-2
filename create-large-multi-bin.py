@@ -5,7 +5,7 @@ import multiprocessing
 import time
 from functools import partial
 
-dir_name = "a/b12"
+dir_name = "a/b13"
 dir_prefix = "c"
 prefix = "d"
 # 总大小设置为GB
