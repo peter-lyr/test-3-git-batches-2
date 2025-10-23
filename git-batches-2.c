@@ -45,7 +45,7 @@
 #include <windows.h>
 
 #define MAX_PATH_LENGTH 4096
-#define MAX_GROUP_SIZE (100 * 1024 * 1024LL) // 100MB
+#define MAX_GROUP_SIZE (50 * 1024 * 1024LL) // 50MB
 #define MAX_ITEMS 100000
 #define MAX_COMMAND_LENGTH 20000
 
