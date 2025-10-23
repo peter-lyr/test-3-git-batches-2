@@ -896,7 +896,7 @@ void process_input_path(const char *path, FileItem *items, int *item_count,
           }
 
           // 更新.gitignore
-          update_gitignore(path, items, &item_count, total_scanned_size,
+          update_gitignore(path, items, item_count, total_scanned_size,
                            total_file_count);
           // 移动原文件到备份目录
           move_to_backup(path);
