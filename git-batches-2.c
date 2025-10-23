@@ -157,27 +157,136 @@ int split_large_file(const char *filepath, long long file_size,
   char split_dir[MAX_PATH_LENGTH];
   _snprintf_s(split_dir, sizeof(split_dir), _TRUNCATE, "%s-split", filepath);
 
-  // 如果目录已存在，先删除
   wchar_t *wsplit_dir = char_to_wchar(split_dir);
   DWORD attr = GetFileAttributesW(wsplit_dir);
-  if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
-    // 递归删除目录
-    SHFILEOPSTRUCTW file_op = {.hwnd = NULL,
-                               .wFunc = FO_DELETE,
-                               .pFrom = wsplit_dir,
-                               .pTo = NULL,
-                               .fFlags = FOF_NOCONFIRMATION | FOF_SILENT |
-                                         FOF_NOERRORUI};
-    SHFileOperationW(&file_op);
-  }
-  free(wsplit_dir);
 
-  // 创建新目录
-  if (!CreateDirectoryA(split_dir, NULL)) {
-    printf("错误: 无法创建分割目录 %s\n", split_dir);
-    fclose(src_file);
-    return 0;
+  // 检查分割目录是否存在
+  if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+    printf("分割目录已存在: %s\n", split_dir);
+
+    // 计算现有分割文件的总大小
+    long long existing_total_size = 0;
+    int existing_file_count = 0;
+    char existing_files[100][MAX_PATH_LENGTH];
+
+    // 遍历分割目录中的文件
+    wchar_t search_path[MAX_PATH_LENGTH];
+    _snwprintf_s(search_path, MAX_PATH_LENGTH, _TRUNCATE, L"%s\\*", wsplit_dir);
+
+    WIN32_FIND_DATAW find_data;
+    HANDLE hFind = FindFirstFileW(search_path, &find_data);
+
+    if (hFind != INVALID_HANDLE_VALUE) {
+      do {
+        if (wcscmp(find_data.cFileName, L".") == 0 ||
+            wcscmp(find_data.cFileName, L"..") == 0) {
+          continue;
+        }
+
+        // 只处理文件，忽略子目录
+        if (!(find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+          wchar_t full_path[MAX_PATH_LENGTH];
+          _snwprintf_s(full_path, MAX_PATH_LENGTH, _TRUNCATE, L"%s\\%s",
+                       wsplit_dir, find_data.cFileName);
+
+          // 获取文件大小
+          HANDLE hFile =
+              CreateFileW(full_path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+          if (hFile != INVALID_HANDLE_VALUE) {
+            DWORD sizeLow, sizeHigh;
+            sizeLow = GetFileSize(hFile, &sizeHigh);
+            long long part_size = ((ULONGLONG)sizeHigh << 32) | sizeLow;
+            CloseHandle(hFile);
+
+            existing_total_size += part_size;
+
+            // 保存现有文件路径
+            if (existing_file_count < 100) {
+              char *char_path = wchar_to_char(full_path);
+              strcpy_s(existing_files[existing_file_count], MAX_PATH_LENGTH,
+                       char_path);
+              existing_file_count++;
+              free(char_path);
+            }
+          }
+        }
+      } while (FindNextFileW(hFind, &find_data));
+      FindClose(hFind);
+    }
+
+    printf("现有分割文件总大小: %.2f MB, 原文件大小: %.2f MB\n",
+           existing_total_size / (1024.0 * 1024.0),
+           file_size / (1024.0 * 1024.0));
+
+    // 检查大小是否一致
+    if (existing_total_size == file_size && existing_file_count > 0) {
+      printf("分割文件大小匹配，使用现有文件\n");
+
+      // 复制现有文件路径到结果数组
+      *num_parts = existing_file_count;
+      for (int i = 0; i < existing_file_count; i++) {
+        strcpy_s(split_files[i], MAX_PATH_LENGTH, existing_files[i]);
+        printf("使用现有分割文件: %s\n", existing_files[i]);
+      }
+
+      fclose(src_file);
+      free(wsplit_dir);
+      return 1;
+    } else {
+      printf("分割文件大小不匹配或文件数量为0，删除现有文件并重新分割\n");
+
+      // 删除目录中的所有文件（但不删除目录本身）
+      wchar_t delete_search_path[MAX_PATH_LENGTH];
+      _snwprintf_s(delete_search_path, MAX_PATH_LENGTH, _TRUNCATE, L"%s\\*",
+                   wsplit_dir);
+
+      WIN32_FIND_DATAW delete_find_data;
+      HANDLE hDeleteFind =
+          FindFirstFileW(delete_search_path, &delete_find_data);
+
+      if (hDeleteFind != INVALID_HANDLE_VALUE) {
+        do {
+          if (wcscmp(delete_find_data.cFileName, L".") == 0 ||
+              wcscmp(delete_find_data.cFileName, L"..") == 0) {
+            continue;
+          }
+
+          wchar_t delete_file_path[MAX_PATH_LENGTH];
+          _snwprintf_s(delete_file_path, MAX_PATH_LENGTH, _TRUNCATE, L"%s\\%s",
+                       wsplit_dir, delete_find_data.cFileName);
+
+          if (delete_find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            // 递归删除子目录
+            SHFILEOPSTRUCTW file_op = {.hwnd = NULL,
+                                       .wFunc = FO_DELETE,
+                                       .pFrom = delete_file_path,
+                                       .pTo = NULL,
+                                       .fFlags = FOF_NOCONFIRMATION |
+                                                 FOF_SILENT | FOF_NOERRORUI};
+            SHFileOperationW(&file_op);
+          } else {
+            // 删除文件
+            DeleteFileW(delete_file_path);
+          }
+        } while (FindNextFileW(hDeleteFind, &delete_find_data));
+        FindClose(hDeleteFind);
+      }
+
+      printf("已清理分割目录中的文件\n");
+    }
+  } else {
+    // 目录不存在，创建新目录
+    if (!CreateDirectoryA(split_dir, NULL)) {
+      printf("错误: 无法创建分割目录 %s\n", split_dir);
+      fclose(src_file);
+      free(wsplit_dir);
+      return 0;
+    }
+    printf("创建分割目录: %s\n", split_dir);
   }
+
+  free(wsplit_dir);
 
   // 计算需要分割的份数
   *num_parts = (file_size + SPLIT_PART_SIZE - 1) / SPLIT_PART_SIZE;
@@ -195,6 +304,15 @@ int split_large_file(const char *filepath, long long file_size,
     } else {
       _snprintf_s(part_filename, sizeof(part_filename), _TRUNCATE,
                   "%s\\%s-part%04d", split_dir, filename, i + 1);
+    }
+
+    // 检查文件是否已存在（在清理后应该不存在，但为了安全还是检查）
+    FILE *test_file = fopen(part_filename, "rb");
+    if (test_file) {
+      fclose(test_file);
+      printf("分割文件已存在，跳过: %s\n", part_filename);
+      strcpy_s(split_files[i], MAX_PATH_LENGTH, part_filename);
+      continue;
     }
 
     FILE *dst_file = fopen(part_filename, "wb");
