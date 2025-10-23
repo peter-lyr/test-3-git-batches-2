@@ -382,7 +382,8 @@ int split_large_file(const char *filepath, long long file_size,
 }
 
 // 更新.gitignore文件（在文件所在目录）
-void update_gitignore(const char *filepath) {
+void update_gitignore(const char *filepath, FileItem *items, int *item_count,
+                      long long *total_scanned_size, int *total_file_count) {
   // 获取文件所在目录
   char file_dir[MAX_PATH_LENGTH];
   get_directory_path(filepath, file_dir, sizeof(file_dir));
@@ -446,6 +447,36 @@ void update_gitignore(const char *filepath) {
   fclose(gitignore);
 
   printf("已在 %s 中添加: %s\n", gitignore_path, ignore_pattern);
+
+  // 将.gitignore文件添加到项目列表
+  if (*item_count < MAX_ITEMS) {
+    // 获取.gitignore文件大小
+    WIN32_FILE_ATTRIBUTE_DATA file_attr;
+    wchar_t *wgitignore_path = char_to_wchar(gitignore_path);
+    long long gitignore_size = 0;
+
+    if (GetFileAttributesExW(wgitignore_path, GetFileExInfoStandard,
+                             &file_attr)) {
+      gitignore_size =
+          ((ULONGLONG)file_attr.nFileSizeHigh << 32) | file_attr.nFileSizeLow;
+    }
+
+    strcpy_s(items[*item_count].path, MAX_PATH_LENGTH, gitignore_path);
+    items[*item_count].size = gitignore_size;
+    items[*item_count].type = TYPE_FILE;
+    (*item_count)++;
+
+    // 更新统计信息
+    (*total_file_count)++;
+    *total_scanned_size += gitignore_size;
+
+    printf("已将 .gitignore 文件添加到列表: %s (%.2f MB)\n", gitignore_path,
+           gitignore_size / (1024.0 * 1024.0));
+
+    free(wgitignore_path);
+  } else {
+    printf("警告: 项目数量达到上限，无法添加 .gitignore 文件\n");
+  }
 }
 
 // 移动原文件到备份目录（保持目录结构）
@@ -713,7 +744,8 @@ void collect_items_recursive(const wchar_t *wpath, FileItem *items,
           }
 
           // 更新.gitignore
-          update_gitignore(char_path);
+          update_gitignore(char_path, items, item_count, total_scanned_size,
+                           total_file_count);
 
           // 移动原文件到备份目录
           move_to_backup(char_path);
@@ -861,8 +893,8 @@ void process_input_path(const char *path, FileItem *items, int *item_count,
           }
 
           // 更新.gitignore
-          update_gitignore(path);
-
+          update_gitignore(path, items, &item_count, total_scanned_size,
+                           total_file_count);
           // 移动原文件到备份目录
           move_to_backup(path);
         } else {
