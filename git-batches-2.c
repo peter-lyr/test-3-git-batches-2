@@ -48,6 +48,7 @@
 #define MAX_GROUP_SIZE (50 * 1024 * 1024LL) // 50MB
 #define MAX_ITEMS 100000
 #define MAX_COMMAND_LENGTH 20000
+#define SPLIT_PART_SIZE (45 * 1024 * 1024LL) // 45MB，确保小于MAX_GROUP_SIZE
 
 typedef enum { TYPE_FILE, TYPE_DIRECTORY } ItemType;
 
@@ -86,6 +87,240 @@ char *wchar_to_char(const wchar_t *wstr) {
   char *str = (char *)malloc(len);
   WideCharToMultiByte(CP_UTF8, 0, wstr, -1, str, len, NULL, NULL);
   return str;
+}
+
+// 获取文件扩展名
+const char *get_file_extension(const char *filename) {
+  const char *dot = strrchr(filename, '.');
+  if (!dot || dot == filename)
+    return "";
+  return dot + 1;
+}
+
+// 获取文件名（不含路径）
+const char *get_file_name(const char *path) {
+  const char *filename = strrchr(path, '\\');
+  if (filename)
+    return filename + 1;
+
+  filename = strrchr(path, '/');
+  if (filename)
+    return filename + 1;
+
+  return path;
+}
+
+// 获取目录路径
+void get_directory_path(const char *filepath, char *dirpath,
+                        size_t buffer_size) {
+  const char *last_slash = strrchr(filepath, '\\');
+  if (!last_slash) {
+    last_slash = strrchr(filepath, '/');
+  }
+
+  if (last_slash) {
+    size_t len = last_slash - filepath;
+    if (len < buffer_size) {
+      strncpy(dirpath, filepath, len);
+      dirpath[len] = '\0';
+    } else {
+      dirpath[0] = '\0';
+    }
+  } else {
+    dirpath[0] = '\0';
+  }
+}
+
+// 分割大文件
+int split_large_file(const char *filepath, long long file_size,
+                     char split_files[][MAX_PATH_LENGTH], int *num_parts) {
+  FILE *src_file = fopen(filepath, "rb");
+  if (!src_file) {
+    printf("错误: 无法打开文件 %s\n", filepath);
+    return 0;
+  }
+
+  // 创建分割文件目录
+  char split_dir[MAX_PATH_LENGTH];
+  _snprintf_s(split_dir, sizeof(split_dir), _TRUNCATE, "%s-split", filepath);
+
+  // 如果目录已存在，先删除
+  wchar_t *wsplit_dir = char_to_wchar(split_dir);
+  DWORD attr = GetFileAttributesW(wsplit_dir);
+  if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+    // 递归删除目录
+    SHFILEOPSTRUCTW file_op = {.hwnd = NULL,
+                               .wFunc = FO_DELETE,
+                               .pFrom = wsplit_dir,
+                               .pTo = NULL,
+                               .fFlags = FOF_NOCONFIRMATION | FOF_SILENT |
+                                         FOF_NOERRORUI};
+    SHFileOperationW(&file_op);
+  }
+  free(wsplit_dir);
+
+  // 创建新目录
+  if (!CreateDirectoryA(split_dir, NULL)) {
+    printf("错误: 无法创建分割目录 %s\n", split_dir);
+    fclose(src_file);
+    return 0;
+  }
+
+  // 计算需要分割的份数
+  *num_parts = (file_size + SPLIT_PART_SIZE - 1) / SPLIT_PART_SIZE;
+
+  const char *filename = get_file_name(filepath);
+  const char *extension = get_file_extension(filename);
+
+  // 分割文件
+  int success = 1;
+  for (int i = 0; i < *num_parts; i++) {
+    char part_filename[MAX_PATH_LENGTH];
+    if (extension[0] != '\0') {
+      _snprintf_s(part_filename, sizeof(part_filename), _TRUNCATE,
+                  "%s\\%s-part%04d.%s", split_dir, filename, i + 1, extension);
+    } else {
+      _snprintf_s(part_filename, sizeof(part_filename), _TRUNCATE,
+                  "%s\\%s-part%04d", split_dir, filename, i + 1);
+    }
+
+    FILE *dst_file = fopen(part_filename, "wb");
+    if (!dst_file) {
+      printf("错误: 无法创建分割文件 %s\n", part_filename);
+      success = 0;
+      break;
+    }
+
+    // 复制数据
+    long long bytes_remaining = (i == *num_parts - 1)
+                                    ? file_size - (SPLIT_PART_SIZE * i)
+                                    : SPLIT_PART_SIZE;
+    char buffer[64 * 1024]; // 64KB缓冲区
+
+    while (bytes_remaining > 0) {
+      size_t bytes_to_read = (bytes_remaining > sizeof(buffer))
+                                 ? sizeof(buffer)
+                                 : (size_t)bytes_remaining;
+      size_t bytes_read = fread(buffer, 1, bytes_to_read, src_file);
+
+      if (bytes_read == 0)
+        break;
+
+      size_t bytes_written = fwrite(buffer, 1, bytes_read, dst_file);
+      if (bytes_written != bytes_read) {
+        printf("错误: 写入分割文件失败 %s\n", part_filename);
+        success = 0;
+        break;
+      }
+
+      bytes_remaining -= bytes_read;
+    }
+
+    fclose(dst_file);
+
+    if (!success)
+      break;
+
+    // 保存分割文件路径
+    strcpy_s(split_files[i], MAX_PATH_LENGTH, part_filename);
+    printf("创建分割文件: %s (%.2f MB)\n", part_filename,
+           SPLIT_PART_SIZE / (1024.0 * 1024.0));
+  }
+
+  fclose(src_file);
+
+  if (success) {
+    printf("成功分割文件 %s 为 %d 个部分\n", filepath, *num_parts);
+  } else {
+    printf("分割文件失败: %s\n", filepath);
+  }
+
+  return success;
+}
+
+// 更新.gitignore文件
+void update_gitignore(const char *filepath) {
+  const char *filename = get_file_name(filepath);
+  const char *extension = get_file_extension(filename);
+
+  char ignore_pattern[MAX_PATH_LENGTH];
+  if (extension[0] != '\0') {
+    _snprintf_s(ignore_pattern, sizeof(ignore_pattern), _TRUNCATE,
+                "%s-merged.%s", filename, extension);
+  } else {
+    _snprintf_s(ignore_pattern, sizeof(ignore_pattern), _TRUNCATE, "%s-merged",
+                filename);
+  }
+
+  FILE *gitignore = fopen(".gitignore", "a+");
+  if (!gitignore) {
+    gitignore = fopen(".gitignore", "w");
+    if (!gitignore) {
+      printf("错误: 无法创建或打开 .gitignore 文件\n");
+      return;
+    }
+  } else {
+    // 检查是否已存在该模式
+    char line[MAX_PATH_LENGTH];
+    int already_exists = 0;
+    fseek(gitignore, 0, SEEK_SET);
+
+    while (fgets(line, sizeof(line), gitignore)) {
+      // 去除换行符
+      line[strcspn(line, "\r\n")] = '\0';
+      if (strcmp(line, ignore_pattern) == 0) {
+        already_exists = 1;
+        break;
+      }
+    }
+
+    if (already_exists) {
+      fclose(gitignore);
+      return;
+    }
+  }
+
+  fprintf(gitignore, "%s\n", ignore_pattern);
+  fclose(gitignore);
+
+  printf("已在 .gitignore 中添加: %s\n", ignore_pattern);
+}
+
+// 移动原文件到备份目录
+int move_to_backup(const char *filepath) {
+  char current_dir[MAX_PATH_LENGTH];
+  if (!GetCurrentDirectoryA(sizeof(current_dir), current_dir)) {
+    printf("错误: 无法获取当前目录\n");
+    return 0;
+  }
+
+  // 创建备份目录路径（当前目录加-backup1后缀）
+  char backup_dir[MAX_PATH_LENGTH];
+  _snprintf_s(backup_dir, sizeof(backup_dir), _TRUNCATE, "%s-backup1",
+              current_dir);
+
+  // 创建备份目录
+  if (!CreateDirectoryA(backup_dir, NULL)) {
+    if (GetLastError() != ERROR_ALREADY_EXISTS) {
+      printf("错误: 无法创建备份目录 %s\n", backup_dir);
+      return 0;
+    }
+  }
+
+  // 构建备份文件路径
+  const char *filename = get_file_name(filepath);
+  char backup_path[MAX_PATH_LENGTH];
+  _snprintf_s(backup_path, sizeof(backup_path), _TRUNCATE, "%s\\%s", backup_dir,
+              filename);
+
+  // 移动文件
+  if (MoveFileA(filepath, backup_path)) {
+    printf("已移动原文件到备份: %s -> %s\n", filepath, backup_path);
+    return 1;
+  } else {
+    printf("错误: 无法移动文件到备份目录，错误代码: %lu\n", GetLastError());
+    return 0;
+  }
 }
 
 // 计算文件夹大小（不进行统计，只计算大小）
@@ -181,10 +416,47 @@ void collect_items_recursive(const wchar_t *wpath, FileItem *items,
       *total_scanned_size += file_size;
 
       if (file_size > MAX_GROUP_SIZE) {
+        // 分割大文件
         char *char_path = wchar_to_char(full_path);
-        printf("跳过大文件: %s (%.2f MB)\n", char_path,
+        printf("发现大文件，开始分割: %s (%.2f MB)\n", char_path,
                file_size / (1024.0 * 1024.0));
-        *skipped_files_size += file_size;
+
+        char split_files[100][MAX_PATH_LENGTH]; // 假设最多100个分割文件
+        int num_parts = 0;
+
+        if (split_large_file(char_path, file_size, split_files, &num_parts)) {
+          // 添加分割文件到列表
+          for (int i = 0; i < num_parts && *item_count < MAX_ITEMS; i++) {
+            // 获取分割文件大小
+            WIN32_FILE_ATTRIBUTE_DATA file_attr;
+            wchar_t *wsplit_path = char_to_wchar(split_files[i]);
+            if (GetFileAttributesExW(wsplit_path, GetFileExInfoStandard,
+                                     &file_attr)) {
+              long long part_size = ((ULONGLONG)file_attr.nFileSizeHigh << 32) |
+                                    file_attr.nFileSizeLow;
+
+              strcpy_s(items[*item_count].path, MAX_PATH_LENGTH,
+                       split_files[i]);
+              items[*item_count].size = part_size;
+              items[*item_count].type = TYPE_FILE;
+              (*item_count)++;
+
+              printf("添加分割文件: %s (%.2f MB)\n", split_files[i],
+                     part_size / (1024.0 * 1024.0));
+            }
+            free(wsplit_path);
+          }
+
+          // 更新.gitignore
+          update_gitignore(char_path);
+
+          // 移动原文件到备份目录
+          move_to_backup(char_path);
+        } else {
+          printf("分割大文件失败: %s\n", char_path);
+          *skipped_files_size += file_size;
+        }
+
         free(char_path);
       } else {
         // 文件大小合适，添加到列表
@@ -278,9 +550,45 @@ void process_input_path(const char *path, FileItem *items, int *item_count,
       *total_scanned_size += file_size;
 
       if (file_size > MAX_GROUP_SIZE) {
-        printf("跳过大文件: %s (%.2f MB)\n", path,
+        // 分割大文件
+        printf("发现大文件，开始分割: %s (%.2f MB)\n", path,
                file_size / (1024.0 * 1024.0));
-        *skipped_files_size += file_size;
+
+        char split_files[100][MAX_PATH_LENGTH]; // 假设最多100个分割文件
+        int num_parts = 0;
+
+        if (split_large_file(path, file_size, split_files, &num_parts)) {
+          // 添加分割文件到列表
+          for (int i = 0; i < num_parts && *item_count < MAX_ITEMS; i++) {
+            // 获取分割文件大小
+            WIN32_FILE_ATTRIBUTE_DATA file_attr;
+            wchar_t *wsplit_path = char_to_wchar(split_files[i]);
+            if (GetFileAttributesExW(wsplit_path, GetFileExInfoStandard,
+                                     &file_attr)) {
+              long long part_size = ((ULONGLONG)file_attr.nFileSizeHigh << 32) |
+                                    file_attr.nFileSizeLow;
+
+              strcpy_s(items[*item_count].path, MAX_PATH_LENGTH,
+                       split_files[i]);
+              items[*item_count].size = part_size;
+              items[*item_count].type = TYPE_FILE;
+              (*item_count)++;
+
+              printf("添加分割文件: %s (%.2f MB)\n", split_files[i],
+                     part_size / (1024.0 * 1024.0));
+            }
+            free(wsplit_path);
+          }
+
+          // 更新.gitignore
+          update_gitignore(path);
+
+          // 移动原文件到备份目录
+          move_to_backup(path);
+        } else {
+          printf("分割大文件失败: %s\n", path);
+          *skipped_files_size += file_size;
+        }
       } else {
         if (*item_count < MAX_ITEMS) {
           strcpy_s(items[*item_count].path, MAX_PATH_LENGTH, path);
@@ -711,9 +1019,6 @@ void process_git_groups(GroupResult *result, const char *commit_info_file) {
     printf("分组 %d 处理完成\n\n", i + 1);
   }
 
-  // 最后执行 git push
-  // printf("执行最终的 git push...\n");
-  // execute_git_command("git push");
   printf("所有分组处理完成！\n");
 }
 
