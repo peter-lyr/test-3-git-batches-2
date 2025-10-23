@@ -298,13 +298,8 @@ int split_large_file(const char *filepath, long long file_size,
   int success = 1;
   for (int i = 0; i < *num_parts; i++) {
     char part_filename[MAX_PATH_LENGTH];
-    if (extension[0] != '\0') {
-      _snprintf_s(part_filename, sizeof(part_filename), _TRUNCATE,
-                  "%s\\%s-part%04d.%s", split_dir, filename, i + 1, extension);
-    } else {
-      _snprintf_s(part_filename, sizeof(part_filename), _TRUNCATE,
-                  "%s\\%s-part%04d", split_dir, filename, i + 1);
-    }
+    _snprintf_s(part_filename, sizeof(part_filename), _TRUNCATE,
+                "%s\\%s-part%04d", split_dir, filename, i + 1);
 
     // 检查文件是否已存在（在清理后应该不存在，但为了安全还是检查）
     FILE *test_file = fopen(part_filename, "rb");

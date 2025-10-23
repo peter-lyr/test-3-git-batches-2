@@ -1,1 +1,1 @@
-检查分割文件和大文件是否一致
+"%s\\%s-part%04d", split_dir, filename
