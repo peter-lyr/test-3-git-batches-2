@@ -339,6 +339,9 @@ int move_to_backup(const char *filepath) {
 
   // 获取文件的相对路径（相对于当前目录）
   char relative_path[MAX_PATH_LENGTH];
+  printf("filepath: %s, ", filepath);
+  printf("current_dir: %s\n", current_dir);
+  printf("strstr(filepath, current_dir): %s\n", strstr(filepath, current_dir));
   if (strstr(filepath, current_dir) == filepath) {
     // 文件在当前目录或其子目录中
     strcpy_s(relative_path, sizeof(relative_path),
