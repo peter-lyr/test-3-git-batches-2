@@ -610,8 +610,7 @@ char *create_group_commit_file(const char *base_commit_file, int group_index,
 
   // 添加分组信息
   fprintf(temp_file, "%d/%d, ", group_index + 1, total_groups);
-  fprintf(temp_file, "%.2f MB, ",
-          group->total_size / (1024.0 * 1024.0));
+  fprintf(temp_file, "%.2f MB, ", group->total_size / (1024.0 * 1024.0));
 
   // 统计文件和文件夹数量
   int file_count = 0, dir_count = 0;
