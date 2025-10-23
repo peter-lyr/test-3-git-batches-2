@@ -123,6 +123,19 @@ void get_directory_path(const char *filepath, char *dirpath,
     if (len < buffer_size) {
       strncpy(dirpath, filepath, len);
       dirpath[len] = '\0';
+
+      // 如果是根目录（如 "C:\"），确保不以反斜杠结尾（除了根目录本身）
+      if (len == 2 && filepath[1] == ':') {
+        // 这是根目录，如 "C:"，保持原样
+      } else if (len == 3 && filepath[1] == ':' &&
+                 (filepath[2] == '\\' || filepath[2] == '/')) {
+        // 这是根目录，如 "C:\"，保持原样
+      } else {
+        // 去除末尾的反斜杠（如果不是根目录）
+        if (dirpath[len - 1] == '\\' || dirpath[len - 1] == '/') {
+          dirpath[len - 1] = '\0';
+        }
+      }
     } else {
       dirpath[0] = '\0';
     }
@@ -238,8 +251,25 @@ int split_large_file(const char *filepath, long long file_size,
   return success;
 }
 
-// 更新.gitignore文件（在文件所在目录创建）
+// 更新.gitignore文件（在文件所在目录）
 void update_gitignore(const char *filepath) {
+  // 获取文件所在目录
+  char file_dir[MAX_PATH_LENGTH];
+  get_directory_path(filepath, file_dir, sizeof(file_dir));
+
+  // 如果无法获取目录，使用当前目录
+  if (strlen(file_dir) == 0) {
+    if (!GetCurrentDirectoryA(sizeof(file_dir), file_dir)) {
+      printf("错误: 无法获取当前目录\n");
+      return;
+    }
+  }
+
+  // 构建.gitignore文件路径
+  char gitignore_path[MAX_PATH_LENGTH];
+  _snprintf_s(gitignore_path, sizeof(gitignore_path), _TRUNCATE,
+              "%s\\.gitignore", file_dir);
+
   const char *filename = get_file_name(filepath);
   const char *extension = get_file_extension(filename);
 
@@ -252,51 +282,38 @@ void update_gitignore(const char *filepath) {
                 filename);
   }
 
-  // 获取文件所在目录
-  char file_dir[MAX_PATH_LENGTH];
-  get_directory_path(filepath, file_dir, sizeof(file_dir));
+  FILE *gitignore = fopen(gitignore_path, "a+");
+  if (!gitignore) {
+    gitignore = fopen(gitignore_path, "w");
+    if (!gitignore) {
+      printf("错误: 无法创建或打开 .gitignore 文件: %s\n", gitignore_path);
+      return;
+    }
+  } else {
+    // 检查是否已存在该模式
+    char line[MAX_PATH_LENGTH];
+    int already_exists = 0;
+    fseek(gitignore, 0, SEEK_SET);
 
-  if (strlen(file_dir) == 0) {
-    // 如果文件在当前目录，使用当前目录
-    if (!GetCurrentDirectoryA(sizeof(file_dir), file_dir)) {
-      printf("错误: 无法获取当前目录\n");
+    while (fgets(line, sizeof(line), gitignore)) {
+      // 去除换行符
+      line[strcspn(line, "\r\n")] = '\0';
+      if (strcmp(line, ignore_pattern) == 0) {
+        already_exists = 1;
+        break;
+      }
+    }
+
+    if (already_exists) {
+      fclose(gitignore);
       return;
     }
   }
 
-  // 构建.gitignore文件路径
-  char gitignore_path[MAX_PATH_LENGTH];
-  _snprintf_s(gitignore_path, sizeof(gitignore_path), _TRUNCATE,
-              "%s\\.gitignore", file_dir);
-
-  FILE *gitignore = fopen(gitignore_path, "a+");
-  if (!gitignore) {
-    printf("错误: 无法创建或打开 .gitignore 文件: %s\n", gitignore_path);
-    return;
-  }
-
-  // 检查是否已存在该模式
-  char line[MAX_PATH_LENGTH];
-  int already_exists = 0;
-  fseek(gitignore, 0, SEEK_SET);
-
-  while (fgets(line, sizeof(line), gitignore)) {
-    // 去除换行符
-    line[strcspn(line, "\r\n")] = '\0';
-    if (strcmp(line, ignore_pattern) == 0) {
-      already_exists = 1;
-      break;
-    }
-  }
-
-  if (!already_exists) {
-    fprintf(gitignore, "%s\n", ignore_pattern);
-    printf("已在 %s 中添加: %s\n", gitignore_path, ignore_pattern);
-  } else {
-    printf("忽略模式已存在: %s\n", ignore_pattern);
-  }
-
+  fprintf(gitignore, "%s\n", ignore_pattern);
   fclose(gitignore);
+
+  printf("已在 %s 中添加: %s\n", gitignore_path, ignore_pattern);
 }
 
 // 移动原文件到备份目录（保持目录结构）
@@ -320,65 +337,57 @@ int move_to_backup(const char *filepath) {
     }
   }
 
-  // 获取文件相对于当前目录的相对路径
+  // 获取文件的相对路径（相对于当前目录）
   char relative_path[MAX_PATH_LENGTH];
   if (strstr(filepath, current_dir) == filepath) {
     // 文件在当前目录或其子目录中
     strcpy_s(relative_path, sizeof(relative_path),
              filepath + strlen(current_dir));
-    // 移除开头的路径分隔符
+    // 去除开头的反斜杠
     if (relative_path[0] == '\\' || relative_path[0] == '/') {
       memmove(relative_path, relative_path + 1, strlen(relative_path));
     }
   } else {
-    // 文件不在当前目录下，使用完整路径但替换冒号和斜杠
-    strcpy_s(relative_path, sizeof(relative_path), filepath);
-    // 将冒号替换为下划线，斜杠替换为下划线
-    for (char *p = relative_path; *p; p++) {
-      if (*p == ':')
-        *p = '_';
-      else if (*p == '\\' || *p == '/')
-        *p = '_';
-    }
+    // 文件不在当前目录下，只使用文件名
+    const char *filename = get_file_name(filepath);
+    strcpy_s(relative_path, sizeof(relative_path), filename);
   }
 
-  // 构建备份文件路径
+  // 构建完整的备份文件路径
   char backup_path[MAX_PATH_LENGTH];
   _snprintf_s(backup_path, sizeof(backup_path), _TRUNCATE, "%s\\%s", backup_dir,
               relative_path);
 
-  // 创建目标目录（如果需要）
-  char backup_file_dir[MAX_PATH_LENGTH];
-  get_directory_path(backup_path, backup_file_dir, sizeof(backup_file_dir));
+  // 创建备份文件所需的目录结构
+  char backup_dir_path[MAX_PATH_LENGTH];
+  get_directory_path(backup_path, backup_dir_path, sizeof(backup_dir_path));
 
-  if (strlen(backup_file_dir) > 0) {
+  if (strlen(backup_dir_path) > 0 && backup_dir_path[0] != '\0') {
     // 递归创建目录
-    char *path = backup_file_dir;
-    if (strstr(path, backup_dir) == path) {
-      path += strlen(backup_dir);
-      if (*path == '\\' || *path == '/')
-        path++;
+    char *path_ptr = backup_dir_path;
+    if (strstr(path_ptr, backup_dir) == path_ptr) {
+      path_ptr += strlen(backup_dir);
+      if (path_ptr[0] == '\\' || path_ptr[0] == '/') {
+        path_ptr++;
+      }
     }
 
     char current_path[MAX_PATH_LENGTH];
     strcpy_s(current_path, sizeof(current_path), backup_dir);
 
-    char *token;
-    char *next_token = NULL;
-    token = strtok_s(path, "\\/", &next_token);
-
+    char *token = strtok(path_ptr, "\\/");
     while (token != NULL) {
       strcat_s(current_path, sizeof(current_path), "\\");
       strcat_s(current_path, sizeof(current_path), token);
 
       if (!CreateDirectoryA(current_path, NULL)) {
         if (GetLastError() != ERROR_ALREADY_EXISTS) {
-          printf("错误: 无法创建备份子目录 %s\n", current_path);
-          return 0;
+          printf("警告: 无法创建备份子目录 %s，错误代码: %lu\n", current_path,
+                 GetLastError());
         }
       }
 
-      token = strtok_s(NULL, "\\/", &next_token);
+      token = strtok(NULL, "\\/");
     }
   }
 
@@ -387,7 +396,25 @@ int move_to_backup(const char *filepath) {
     printf("已移动原文件到备份: %s -> %s\n", filepath, backup_path);
     return 1;
   } else {
-    printf("错误: 无法移动文件到备份目录，错误代码: %lu\n", GetLastError());
+    DWORD error = GetLastError();
+    printf("错误: 无法移动文件到备份目录，错误代码: %lu\n", error);
+
+    // 如果是因为目录不存在，尝试创建父目录后重试
+    if (error == ERROR_PATH_NOT_FOUND) {
+      printf("尝试创建父目录后重试...\n");
+      char parent_dir[MAX_PATH_LENGTH];
+      get_directory_path(backup_path, parent_dir, sizeof(parent_dir));
+
+      if (CreateDirectoryA(parent_dir, NULL) ||
+          GetLastError() == ERROR_ALREADY_EXISTS) {
+        if (MoveFileA(filepath, backup_path)) {
+          printf("重试成功: 已移动原文件到备份\n");
+          return 1;
+        } else {
+          printf("重试失败，错误代码: %lu\n", GetLastError());
+        }
+      }
+    }
     return 0;
   }
 }
