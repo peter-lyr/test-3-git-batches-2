@@ -402,24 +402,24 @@ void update_gitignore(const char *filepath, FileItem *items, int *item_count,
               "%s\\.gitignore", file_dir);
 
   const char *filename = get_file_name(filepath);
-  const char *extension = get_file_extension(filename);
-  filename = get_file_name_without_extension(filepath);
+  char *filename_without_ext = get_file_name_without_extension(filename);
 
   char ignore_pattern[MAX_PATH_LENGTH];
+  const char *extension = get_file_extension(filename);
   if (extension[0] != '\0') {
     _snprintf_s(ignore_pattern, sizeof(ignore_pattern), _TRUNCATE,
-                "%s-merged.%s", filename, extension);
+                "%s-merged.%s", filename_without_ext, extension);
   } else {
     _snprintf_s(ignore_pattern, sizeof(ignore_pattern), _TRUNCATE, "%s-merged",
-                filename);
+                filename_without_ext);
   }
-  free((void *)filename);
 
   FILE *gitignore = fopen(gitignore_path, "a+");
   if (!gitignore) {
     gitignore = fopen(gitignore_path, "w");
     if (!gitignore) {
       printf("错误: 无法创建或打开 .gitignore 文件: %s\n", gitignore_path);
+      free(filename_without_ext);
       return;
     }
   } else {
@@ -439,6 +439,7 @@ void update_gitignore(const char *filepath, FileItem *items, int *item_count,
 
     if (already_exists) {
       fclose(gitignore);
+      free(filename_without_ext);
       return;
     }
   }
@@ -477,6 +478,8 @@ void update_gitignore(const char *filepath, FileItem *items, int *item_count,
   } else {
     printf("警告: 项目数量达到上限，无法添加 .gitignore 文件\n");
   }
+
+  free(filename_without_ext);
 }
 
 // 移动原文件到备份目录（保持目录结构）
