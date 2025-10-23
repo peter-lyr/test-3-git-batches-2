@@ -3,8 +3,8 @@ setlocal enabledelayedexpansion
 chcp 65001>nul
 cd %~dp0
 
-REM del /f /q git-batches-2.exe
-REM gcc -o git-batches-2.exe git-batches-2.c
+del /f /q git-batches-2.exe
+gcc -o git-batches-2.exe git-batches-2.c
 
 set start=%time%
 
