@@ -110,6 +110,23 @@ const char *get_file_name(const char *path) {
   return path;
 }
 
+// 获取不带扩展名的文件名（需要调用者释放内存）
+char *get_file_name_without_extension(const char *path) {
+  const char *filename = get_file_name(path);
+  const char *dot = strrchr(filename, '.');
+
+  if (!dot || dot == filename)
+    return strdup(filename);
+
+  size_t len = dot - filename;
+  char *result = malloc(len + 1);
+  if (result) {
+    strncpy(result, filename, len);
+    result[len] = '\0';
+  }
+  return result;
+}
+
 // 获取目录路径
 void get_directory_path(const char *filepath, char *dirpath,
                         size_t buffer_size) {
@@ -385,6 +402,7 @@ void update_gitignore(const char *filepath) {
 
   const char *filename = get_file_name(filepath);
   const char *extension = get_file_extension(filename);
+  filename = get_file_name_without_extension(filepath);
 
   char ignore_pattern[MAX_PATH_LENGTH];
   if (extension[0] != '\0') {
@@ -394,6 +412,7 @@ void update_gitignore(const char *filepath) {
     _snprintf_s(ignore_pattern, sizeof(ignore_pattern), _TRUNCATE, "%s-merged",
                 filename);
   }
+  free((void *)filename);
 
   FILE *gitignore = fopen(gitignore_path, "a+");
   if (!gitignore) {

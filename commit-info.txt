@@ -1,1 +1,1 @@
-"%s\\%s-part%04d", split_dir, filename
+filename = get_file_name_without_extension(filepath);
