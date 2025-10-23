@@ -347,10 +347,12 @@ int move_to_backup(const char *filepath) {
     if (relative_path[0] == '\\' || relative_path[0] == '/') {
       memmove(relative_path, relative_path + 1, strlen(relative_path));
     }
+    printf("uuuuuuuuuuuuuuuuuuuuuuuuu\n");
   } else {
     // 文件不在当前目录下，只使用文件名
     const char *filename = get_file_name(filepath);
     strcpy_s(relative_path, sizeof(relative_path), filename);
+    printf("xxxxxxxxxxxxxxxxxxxxxxxxx\n");
   }
 
   // 构建完整的备份文件路径
