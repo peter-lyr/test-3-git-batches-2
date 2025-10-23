@@ -1,1 +1,1 @@
-filename = get_file_name_without_extension(filepath);
+删除文件当大小为0继续处理

@@ -775,7 +775,22 @@ void process_input_path(const char *path, FileItem *items, int *item_count,
 
   DWORD attr = GetFileAttributesW(wpath);
   if (attr == INVALID_FILE_ATTRIBUTES) {
-    printf("警告: 无法访问路径 %s\n", path);
+    printf("警告: 无法访问路径 %s，将其当作大小为0的文件处理\n", path);
+
+    // 当作大小为0的文件添加到列表中
+    if (*item_count < MAX_ITEMS) {
+      strcpy_s(items[*item_count].path, MAX_PATH_LENGTH, path);
+      items[*item_count].size = 0;
+      items[*item_count].type = TYPE_FILE; // 假设为文件类型
+      (*item_count)++;
+
+      // 更新统计信息
+      (*total_file_count)++;
+      printf("已将无法访问的路径添加到列表: %s (大小: 0)\n", path);
+    } else {
+      printf("错误: 项目数量达到上限，无法添加路径 %s\n", path);
+    }
+
     free(wpath);
     return;
   }
@@ -861,6 +876,17 @@ void process_input_path(const char *path, FileItem *items, int *item_count,
           items[*item_count].type = TYPE_FILE;
           (*item_count)++;
         }
+      }
+    } else {
+      // 无法打开文件，当作大小为0的文件处理
+      printf("警告: 无法打开文件 %s，将其当作大小为0的文件处理\n", path);
+
+      if (*item_count < MAX_ITEMS) {
+        strcpy_s(items[*item_count].path, MAX_PATH_LENGTH, path);
+        items[*item_count].size = 0;
+        items[*item_count].type = TYPE_FILE;
+        (*item_count)++;
+        printf("已将无法打开的文件添加到列表: %s (大小: 0)\n", path);
       }
     }
   }
