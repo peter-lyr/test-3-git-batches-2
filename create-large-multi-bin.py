@@ -5,11 +5,11 @@ import multiprocessing
 import time
 from functools import partial
 
-dir_name = "a/b7"
+dir_name = "a/b8"
 dir_prefix = "c"
 prefix = "d"
 # 总大小设置为GB
-total_size_mb = 240
+total_size_mb = 120
 # 每个文件大小范围
 min_file_size = 110 * 1024 * 1024
 max_file_size = 130 * 1024 * 1024
