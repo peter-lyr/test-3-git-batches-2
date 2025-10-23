@@ -5,17 +5,17 @@ import multiprocessing
 import time
 from functools import partial
 
-dir_name = "a/b3"
+dir_name = "a/b4"
 dir_prefix = "c"
 prefix = "d"
 # 总大小设置为GB
-total_size_mb = 1000
+total_size_mb = 3000
 # 每个文件大小范围
 min_file_size = 10 * 1024 * 1024
-max_file_size = 20 * 1024 * 1024
+max_file_size = 190 * 1024 * 1024
 # 每个文件夹大小范围
-min_folder_size = 30 * 1024 * 1024
-max_folder_size = 100 * 1024 * 1024
+min_folder_size = 500 * 1024 * 1024
+max_folder_size = 1000 * 1024 * 1024
 
 
 def generate_single_file(file_info, progress_queue):
