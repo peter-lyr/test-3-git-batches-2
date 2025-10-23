@@ -592,6 +592,39 @@ int move_to_backup(const char *filepath) {
     }
   }
 
+  // 检查备份文件是否已存在，如果存在则删除
+  wchar_t *wbackup_path = char_to_wchar(backup_path);
+  DWORD backup_attr = GetFileAttributesW(wbackup_path);
+  if (backup_attr != INVALID_FILE_ATTRIBUTES) {
+    printf("备份文件已存在，正在删除: %s\n", backup_path);
+
+    if (backup_attr & FILE_ATTRIBUTE_DIRECTORY) {
+      // 如果是目录，递归删除
+      SHFILEOPSTRUCTW file_op = {.hwnd = NULL,
+                                 .wFunc = FO_DELETE,
+                                 .pFrom = wbackup_path,
+                                 .pTo = NULL,
+                                 .fFlags = FOF_NOCONFIRMATION | FOF_SILENT |
+                                           FOF_NOERRORUI};
+      int result = SHFileOperationW(&file_op);
+      if (result != 0) {
+        printf("错误: 无法删除已存在的备份目录，错误代码: %d\n", result);
+        free(wbackup_path);
+        return 0;
+      }
+    } else {
+      // 如果是文件，直接删除
+      if (!DeleteFileW(wbackup_path)) {
+        DWORD error = GetLastError();
+        printf("错误: 无法删除已存在的备份文件，错误代码: %lu\n", error);
+        free(wbackup_path);
+        return 0;
+      }
+    }
+    printf("已成功删除已存在的备份文件\n");
+  }
+  free(wbackup_path);
+
   // 移动文件
   printf("移动文件: %s -> %s\n", full_filepath, backup_path);
   if (MoveFileA(full_filepath, backup_path)) {
